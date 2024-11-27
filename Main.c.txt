@@ -1,0 +1,123 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <limits.h>
+#include <omp.h>
+#include <mpi.h>
+
+#define INFINITY INT_MAX
+#define MAX_NODES 100
+#define MAX_EDGES 1000
+
+int adj_matrix[MAX_NODES][MAX_NODES];
+int  dist_matrix[MAX_NODES][MAX_NODES]; 
+int  num_vertices; 
+
+void read_adj_matrix(char *filename) {
+    FILE *file = fopen(filename, "r");
+    if (!file) {
+        printf("Error opening file.\n");
+        exit(1);
+    }
+
+    fscanf(file, "%d", & num_vertices);
+    for (int i = 0; i <  num_vertices; i++) {
+        for (int j = 0; j <  num_vertices; j++) {
+            fscanf(file, "%d", &adj_matrix[i][j]);
+        }
+    }
+
+    fclose(file);
+}
+
+void dijkstra(int source) {
+    
+    for (int i = 0; i <  num_vertices; i++) {
+        for (int j = 0; j <  num_vertices; j++) {
+             dist_matrix[i][j] = adj_matrix[i][j];
+        }
+    }
+
+   
+    int visited[ num_vertices];
+    for (int i = 0; i <  num_vertices; i++) {
+        visited[i] = 0;
+    }
+
+    
+     dist_matrix[source][source] = 0;
+
+    
+    for (int count = 0; count <  num_vertices - 1; count++) {
+        
+        int min_ dist_matrix = INFINITY, min_index;
+        for (int v = 0; v <  num_vertices; v++) {
+            if (!visited[v] &&  dist_matrix[source][v] <= min_ dist_matrix) {
+                min_ dist_matrix =  dist_matrix[source][v];
+                min_index = v;
+            }
+        }
+
+        visited[min_index] = 1;
+
+        #pragma omp parallel for
+        for (int v = 0; v <  num_vertices; v++) {
+            if (!visited[v] && adj_matrix[min_index][v] &&  dist_matrix[source][min_index] != INFINITY
+                &&  dist_matrix[source][min_index] + adj_matrix[min_index][v] <  dist_matrix[source][v]) {
+                 dist_matrix[source][v] =  dist_matrix[source][min_index] + adj_matrix[min_index][v];
+            }
+        }
+    }
+}
+
+void display_results() {
+  
+    for (int i = 0; i <  num_vertices; i++) {
+        for (int j = 0; j <  num_vertices; j++) {
+            if ( dist_matrix[i][j] != INFINITY) {
+                printf("Shortest path from node %d to node %d: %d\n", i, j,  dist_matrix[i][j]);
+            } else {
+                printf("No path from node %d to node %d\n", i, j);
+            }
+        }
+    }
+}
+
+int main(int argc, char *argv[]) {
+    int rank, size;
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    if (argc != 2) {
+        if (rank == 0) {
+            printf("Usage: %s <adj_matrix_file>\n", argv[0]);
+        }
+        MPI_Finalize();
+        exit(1);
+    }
+
+    read_adj_matrix(argv[1]);
+
+    
+    MPI_Bcast(& num_vertices, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(adj_matrix,  num_vertices*MAX_NODES, MPI_INT, 0, MPI_COMM_WORLD);
+
+    
+    #pragma omp parallel for
+    for (int i = rank; i <  num_vertices; i += size) {
+        dijkstra(i);
+    }
+
+    
+    MPI_Gather( dist_matrix,  num_vertices* num_vertices, MPI_INT,  dist_matrix,  num_vertices* num_vertices, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        
+        display_results();
+    }
+
+    MPI_Finalize();
+    return 0;
+}
+
